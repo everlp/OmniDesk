@@ -1,0 +1,23 @@
+# Binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+*.app
+
+# Go workspace file
+go.work
+
+# Dependencies
+vendor/
+
+# OS specific
+.DS_Store
+
+# Frontend
+web/node_modules/
+web/dist/
