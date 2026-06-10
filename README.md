@@ -19,33 +19,33 @@ OmniDesk 采用前后端分离的现代化架构，底座依托于强大的 Goog
 graph TD
     %% 前端层
     subgraph Frontend ["UI 表现层 (Vite + React)"]
-        UI[Glassmorphism Chat UI]
+        UI["Glassmorphism Chat UI"]
     end
 
     %% 后端服务层
     subgraph Backend ["Backend API 层 (Go + Gin)"]
-        API[RESTful API: /api/chat]
+        API["RESTful API: /api/chat"]
     end
 
     %% Agent 引擎层
     subgraph AgentEngine ["Agent Orchestrator (Google ADK)"]
-        Runner[ADK Runner & Session Manager]
-        AgentCore[llmagent.Agent 智能中枢]
+        Runner["ADK Runner & Session Manager"]
+        AgentCore["llmagent.Agent 智能中枢"]
         
         %% 护栏与知识库
-        Guardrails[System Prompt (边界控制)]
-        Adapter[Gemini ADK Adapter]
+        Guardrails["System Prompt (边界控制)"]
+        Adapter["Gemini ADK Adapter"]
     end
 
     %% 外部工具/数据层
     subgraph ToolsData ["Tools & Data Layer"]
-        KnowledgeBase[(本地 Markdown 知识库)]
-        TicketSystem[[模拟工单系统]]
+        KnowledgeBase[("本地 Markdown 知识库")]
+        TicketSystem[["模拟工单系统"]]
     end
 
     %% 核心模型
     subgraph LLM ["Large Language Model"]
-        Gemini((Gemini 2.5 Flash))
+        Gemini(("Gemini 2.5 Flash"))
     end
 
     %% 链路连接
