@@ -1,19 +1,17 @@
 # OmniDesk 🚀
 企业内部智能服务台 Agent
 
-OmniDesk 是一个基于大模型构建的现代化、智能化的企业内部客服中心。它旨在帮助企业员工快速获取 HR 政策、IT 故障排查支持，并在无法自行解决时自动为您创建工单。
+OmniDesk 是一个基于大模型构建的现代化、智能化的企业内部客服中心。它采用 **Multi-Agent (多智能体)** 架构，结合**本地零依赖 RAG (检索增强生成)** 引擎，能够快速帮员工解答 HR 政策、IT 故障排查等问题。同时包含严格的对话防护机制并在无法解决时自动创建工单。
 
 ## 📸 Demo 演示
 
 ![OmniDesk Demo](./docs/demo.png)
 
-*(请将上方的截图保存为 `docs/demo.png`)*
-
 ---
 
-## 🏗 模块化架构图
+## 🏗 Multi-Agent 架构图
 
-OmniDesk 采用前后端分离的现代化架构，底座依托于强大的 Google ADK (Agent Development Kit) 框架。
+OmniDesk 采用前后端分离的现代化架构，底座依托强大的 Google ADK (Agent Development Kit)。重构后，系统从单体 Agent 进化为了职责分离的多智能体协同网络：
 
 ```mermaid
 graph TD
@@ -27,131 +25,97 @@ graph TD
         API["RESTful API: /api/chat"]
     end
 
-    %% Agent 引擎层
-    subgraph AgentEngine ["Agent Orchestrator (Google ADK)"]
-        Runner["ADK Runner & Session Manager"]
-        AgentCore["llmagent.Agent 智能中枢"]
+    %% Agent 引擎层 (Multi-Agent)
+    subgraph AgentEngine ["Agent Orchestrator (智能编排中心)"]
+        Orchestrator["路由调度中枢 (agent.go)"]
         
-        %% 护栏与知识库
-        Guardrails["System Prompt (边界控制)"]
-        Adapter["Gemini ADK Adapter"]
+        GuardAgent["🛡 GuardAgent (情绪与边界管控)"]
+        FAQAgent["⚡️ FAQAgent (高频问题短路拦截)"]
+        EscalationAgent["🎫 EscalationAgent (转人工自动建单)"]
+        SupportAgent["🤖 SupportAgent (深度推理与RAG解答)"]
     end
 
-    %% 外部工具/数据层
-    subgraph ToolsData ["Tools & Data Layer"]
-        KnowledgeBase[("本地 Markdown 知识库")]
-        TicketSystem[["模拟工单系统"]]
-    end
-
-    %% 核心模型
-    subgraph LLM ["Large Language Model"]
-        Gemini(("Gemini 2.5 Flash"))
+    %% RAG & 数据持久层
+    subgraph DataLayer ["Data & RAG Layer"]
+        SQLite[("SQLite: 会话与记录持久化")]
+        VectorDB[("纯 Go 内存向量库 (vector_store.json)")]
     end
 
     %% 链路连接
-    UI <-->|HTTP POST JSON| API
-    API <-->|Message & SessionID| Runner
-    Runner --> AgentCore
-    AgentCore --> Adapter
-    Adapter <--> Gemini
-    AgentCore -.->|配置约束| Guardrails
-
-    %% 工具调用链路
-    AgentCore -->|调用: search_knowledge| KnowledgeBase
-    AgentCore -->|调用: create_ticket| TicketSystem
+    UI <-->|HTTP| API
+    API <-->|SessionID & Message| Orchestrator
+    
+    Orchestrator -->|1. 敏感词拦截| GuardAgent
+    Orchestrator -->|2. 短路拦截| FAQAgent
+    Orchestrator -->|3. 多轮拦截判定| EscalationAgent
+    Orchestrator -->|4. 分发处理| SupportAgent
+    
+    SupportAgent -->|1. 语义向量化查询| VectorDB
+    SupportAgent <-->|2. Gemini 2.5 Flash 推理| LLM(("Google Gemini 大模型"))
+    
+    EscalationAgent -->|拦截自动创建工单| SQLite
+    API -->|聊天记录持久化| SQLite
 ```
 
 ## 🔄 Agent 核心工作流程图
 
-当员工在 Web 界面发起提问时，Agent 会自主进行意图识别、搜索推理和行动决策。
+当员工在 Web 界面发起提问时，Orchestrator 会自动调度不同职责的 Agent 进行流式处理：
 
 ```mermaid
 sequenceDiagram
     participant User as 👨‍💻 员工
-    participant UI as 🖥 前端 Web
-    participant Server as ⚙️ Go 接口
-    participant Agent as 🤖 ADK Agent
-    participant KB as 📚 知识库工具
-    participant Ticket as 🎫 工单工具
-    participant Gemini as 🧠 Gemini大模型
+    participant Orchestrator as ⚙️ Orchestrator
+    participant SubAgents as 🛡 短路 Agent 组
+    participant Support as 🤖 SupportAgent
+    participant RAG as 📚 VectorDB (RAG)
+    participant Gemini as 🧠 Gemini API
 
-    User->>UI: 输入问题 (例:"WiFi怎么连?")
-    UI->>Server: POST /api/chat {session_id, message}
-    Server->>Agent: Runner.Run(ctx, session, message)
+    User->>Orchestrator: 提交提问 (例:"涨工资/我要请假")
     
-    Agent->>Gemini: 携带用户问题和系统指令请求推理
-    Gemini-->>Agent: 意图判定：需要查阅 IT 知识库
-    
-    Agent->>KB: 调用 SearchKnowledgeTool(query="WiFi")
-    KB-->>Agent: 返回 MD 文档中提取的匹配段落
-    
-    Agent->>Gemini: 将检索到的段落补充给大模型重新推理
-    
-    alt 知识库能够解答
-        Gemini-->>Agent: 生成友好的自然语言回答
-    else 知识库无内容 / 硬件故障
-        Gemini-->>Agent: 判定需转人工，决策调用工单工具
-        Agent->>Ticket: 调用 CreateTicketTool(Category, Description)
-        Ticket-->>Agent: 返回生成的 Ticket ID (如 TICKET-123)
-        Agent->>Gemini: 根据工单号生成最终安抚话术
-        Gemini-->>Agent: 最终回复文本
+    Orchestrator->>SubAgents: 依次通过 GuardAgent, FAQAgent, EscalationAgent
+    alt 触发拦截 (敏感词/10轮未解决)
+        SubAgents-->>Orchestrator: 返回拦截话术 / 自动创建 SQLite 工单
+        Orchestrator-->>User: 立即返回兜底答复 (短路阻断)
+    else 正常合规查询
+        Orchestrator->>Support: 移交长文本分析
+        Support->>RAG: 获取提问的向量特征 (gemini-embedding-2)
+        RAG-->>Support: 余弦相似度计算，返回 TopK MD Chunk
+        
+        Support->>Gemini: 携带检索到的企业规章和原始问题
+        Gemini-->>Support: 推理生成最符合情境的答案
+        Support-->>Orchestrator: 提取 Final Response
+        Orchestrator-->>User: 展示优雅的 Markdown 答复及评价按钮
     end
-
-    Agent-->>Server: 提取 Final Response
-    Server-->>UI: 200 OK {reply}
-    UI-->>User: 在聊天气泡中渲染气泡动画
 ```
 
 ### 流程原理解析
 
-为了让上方的交互时序图更易理解，以下是 Agent 的三大核心处理机制：
+为了打造极其轻量却又符合企业级标准的智能客服，我们实现了以下三大核心特性：
 
-1. **意图识别与分发**：当员工在前端页面发送请求时，后端的 Gemini 大模型会首先根据预设的 `System Prompt` 分析用户意图，判断该问题是否属于企业客服范畴，并自主决定下一步该调用哪个工具。
-2. **知识库检索 (RAG)**：对于“年假怎么算”、“访客WiFi怎么连”等政策性查询问题，Agent 会自动提取核心关键词并调用 `SearchKnowledgeTool`，从本地知识库中抓取关联的文档段落，然后再将这些段落交给大模型润色，生成最友好的自然语言回复。
-3. **自动化工单创建**：当员工遇到“电脑蓝屏”、“网络设备损坏”等明显超出知识文档解决范围的物理故障时，Agent 会敏锐地判定此问题需要人工介入，并立刻触发调用 `CreateTicketTool`，在后台自动生成一个附带故障现象的 IT 工单，最后将工单号和安抚话术反馈给员工。
-
----
-
-## 🚀 未来生产环境演进计划 (Production Roadmap)
-
-为了将当前的 Demo 落地为真正的企业级生产应用，我们规划了以下三个维度的演进方向：
-
-### 1. 接入企业级知识库 (Enterprise Knowledge Base)
-目前的知识库基于本地 Markdown 文件进行关键词检索。在生产环境中，我们将升级为：
-- **向量数据库接入**: 引入 Qdrant 或 Milvus，将企业内部庞大的飞书/钉钉文档库、Wiki 沉淀进行 Chunking 和向量化 (Embedding)。
-- **混合检索 (Hybrid Search)**: 结合关键词 (BM25) 与语义检索，大幅提升在处理“年假计算”、“报销流程”等长尾问题的召回率和准确度。
-- **权限隔离**: 接入企业 SSO，使得 Agent 能够在检索时区分不同职级和部门员工的文档访问权限。
-
-### 2. 对接真实工单系统 (Ticket System Integration)
-目前的工单生成 (`CreateTicketTool`) 是一个模拟响应。在线上版本中，我们将：
-- **API 深度集成**: 调用企业内部 Jira、Zendesk 或自研 ITIL 工单系统的 OpenAPI。
-- **自动携带上下文**: Agent 在调用创建工单接口时，自动汇总此前的多轮对话摘要、判断的问题分类（如“网络设备”、“薪酬福利”）以及员工账号信息，避免员工向人工客服重复描述问题。
-- **进度追踪查询**: 提供一个 `CheckTicketStatusTool`，让员工可以随时向 OmniDesk 询问“我的电脑报修现在到哪一步了？”
-
-### 3. 智能人工转交机制 (Human Agent Handoff)
-当遇到 AI 绝对无法处理的边界问题（如严重的生产系统故障、员工情绪激动），必须具备平滑升级至人工客服的能力：
-- **情绪监测与自动转交**: 当模型感知到用户强烈的负面情绪，或连问三次仍未解决问题时，主动中断自动化流程，触发人工转交协议。
-- **WebSocket 坐席接管**: 在保留当前 Web 会话窗口不断开的情况下，通过 WebSocket 将底层应答流从 Gemini 引擎静默切换为真实客服坐席。
-- **客服 Copilot 赋能**: 转交后，人工客服的后台能够看到 AI 预先生成的“问题根因分析 (RCA)”草稿和建议话术，从而提升人工处理的效率。
+1. **纯 Go 本地向量检索引擎 (Zero-Dependency RAG)**：完全抛弃了笨重的外部数据库 (如 Chroma、Milvus)。每次服务启动时，系统会自动切分 `data/knowledge/` 下的 Markdown 文档，通过 `gemini-embedding-2` 转化为高维向量，并利用我们在内存中徒手实现的余弦相似度算法进行毫秒级匹配。
+2. **多智能体各司其职 (Multi-Agent Orchestration)**：抛弃了让大模型承担所有压力的单体架构。诸如“辱骂拦截”、“高频固定问答”以及“强制工单升级（10轮防杠机制）”全部被前置到了极低开销的子智能体中处理，只有真正复杂的企业政策疑问才会交由 `SupportAgent` 进行昂贵的 LLM 推理。
+3. **闭环的数据留存体系**：不管是用户的点赞(👍)、踩(👎) 及反馈意见，还是触发转交人工时生成的 ITIL 工单 (Ticket)，包括每一次对话的轮次上下文，都会被持久化保存在本地轻量的 SQLite 库中，作为日后系统评测与审计的依据。
 
 ---
 
 ## 🛠 快速启动
 
 1. **配置环境变量**
-   您需要配置 Gemini API Key 以驱动大模型推理引擎。
+   配置 Gemini API Key 以驱动大模型推理与 RAG 向量化引擎。
    ```bash
    export GEMINI_API_KEY="您的真实密钥"
    ```
 
 2. **启动后端服务**
+   后端服务采用 Go + Gin 驱动，且原生内置了所有引擎，真正的单体编译，无需配置外部环境！
    ```bash
    cd OmniDesk
    go run cmd/server/main.go
-   # 服务将运行在 http://localhost:8081
+   # 服务将运行在 http://localhost:8082
    ```
 
 3. **启动前端可视化面板**
+   前端基于 Vite + React 打造，实现了 Glassmorphism (毛玻璃) 沉浸式动效设计，并内置了完整的 Markdown / 代码块解析能力。
    在新终端窗口中运行：
    ```bash
    cd OmniDesk/web
